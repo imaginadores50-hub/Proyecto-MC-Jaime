@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flujo en tuberías · Simulador</title>
+<!--
+ PROYECTO INTEGRADOR · Mecánica de Fluidos · CUCEI · UdeG · ciclo 2026B
+ Equipo: E11   Integrante: Jaime Veytia Lizarraga   Fecha: 13/11/2026   Versión: Avance v1
+ Herramienta de IA: Claude (Anthropic). Atribución por componente: Anexo B del reporte.
+ Numeración de ecuaciones = especificación técnica = reporte (Ecs. 1–10).
+-->
+<style>
+:root{color-scheme:light;--bg:#eef6fb;--ink:#1f3442;--mut:#5f7686;--ln:#d3e3ee;--pan:#ffffff;--ac:#2a9fd6;--wr:#c76a12;--er:#c9372c;--ok:#23915a}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,"Segoe UI",Roboto,sans-serif}
+header{padding:14px 20px;border-bottom:2px solid var(--ac);display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between}
+h1{font:600 20px Georgia,serif;margin:0}h2{font:600 15px Georgia,serif;margin:0 0 8px}
+main{display:grid;grid-template-columns:minmax(300px,380px) 1fr;gap:14px;padding:14px;max-width:1400px;margin:auto}
+@media(max-width:860px){main{grid-template-columns:1fr}}
+.p{background:var(--pan);border:1px solid var(--ln);border-radius:6px;padding:12px;margin-bottom:12px}
+label{display:block;font-size:13px;color:var(--mut);margin:6px 0 2px}
+input,select,button{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--ln);border-radius:4px;padding:5px 7px;width:100%}
+input:focus,select:focus,button:focus{outline:2px solid var(--ac)}
+button{cursor:pointer;width:auto;font-weight:600}.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.acc{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}.acc label{font-size:11px;margin:2px 0}.acc input{padding:3px}
+.seg{border-left:4px solid var(--ac);padding-left:10px;margin-top:10px}
+.chips{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}
+.chip{border:1px solid var(--ln);border-radius:6px;padding:8px}.chip b{display:block;font:600 20px Georgia,serif}.chip span{font-size:12px;color:var(--mut)}
+table{border-collapse:collapse;width:100%;font-size:13px}th,td{border-bottom:1px solid var(--ln);padding:4px 6px;text-align:right}th:first-child,td:first-child{text-align:left}
+.w{color:var(--wr)}.e{color:var(--er);font-weight:600}.ok{color:var(--ok)}.sc{overflow-x:auto}
+canvas{width:100%;height:320px;display:block}summary{cursor:pointer;font-weight:600}details{margin-bottom:8px}
+.m{font-family:Consolas,monospace;font-size:13px}small{color:var(--mut)}
+</style></head><body>
+<header><h1>Flujo en tuberías · Reynolds, Colebrook/Moody, pérdidas menores, serie y paralelo</h1>
+<div class="row" style="width:auto;gap:8px"><button id="bu" aria-label="Cambiar sistema de unidades">Unidades: SI</button></div></header>
+<main>
+<section>
+ <div class="p"><h2>Fluido y sistema</h2>
+  <label for="fl">Fluido</label><select id="fl"></select>
+  <label for="T" id="lT"></label><input id="T" type="number" step="any">
+  <div class="row"><div><label for="md">Configuración</label><select id="md"><option value="s">Serie (1–3 tramos)</option><option value="p">Paralelo (2–3 ramales)</option></select></div>
+  <div><label for="n">Número de tramos / ramales</label><select id="n"><option>1</option><option>2</option><option>3</option></select></div></div>
+  <label for="Q" id="lQ"></label><input id="Q" type="number" step="any">
+  <input id="Qr" type="range" aria-label="Gasto" min="0" max="100" step="0.5" value="40">
+  <label for="z" id="lz"></label><input id="z" type="number" step="any">
+  <small>Δz = z₂ − z₁; presiones y velocidades iguales en los extremos (Ec. 7).</small></div>
+ <div id="segs"></div>
+</section>
+<section>
+ <div class="p"><div id="errs" class="e" role="alert"></div><div id="warn" class="w"></div>
+  <div class="chips" id="chips"></div></div>
+ <div class="p"><h2>Esquema (a escala de D y L, coloreado por velocidad)</h2><canvas id="cv"></canvas></div>
+ <div class="p sc"><h2>Resultados intermedios por tramo / ramal</h2><table id="tb"></table><p id="cl" class="m"></p></div>
+</section></main>
+<div style="padding:0 14px 20px;max-width:1400px;margin:auto">
+<details class="p"><summary>Verificación interna del factor de fricción (Ec. 3–4)</summary><div class="sc"><table id="vt"></table></div>
+<small>Valores de referencia de la carta de Moody/Colebrook (White, <i>Fluid Mechanics</i>; Çengel y Cimbala, <i>Mecánica de fluidos</i>), a tres cifras significativas. La validación con problemas resueltos de los textos se reporta en la sección 6 del reporte.</small></details>
+<details class="p"><summary>Panel de documentación: ecuaciones, hipótesis, dominio, fuentes y atribución de IA</summary>
+<div class="m">
+(1) Re = ρ·V·D/μ &nbsp; (2) V = 4Q/(πD²) &nbsp; (3) f = 64/Re (Re ≤ 2300)<br>
+(4) 1/√f = −2·log₁₀[(ε/D)/3.7 + 2.51/(Re·√f)] (Colebrook, Re ≥ 4000; 2300–4000 interpolación lineal)<br>
+(5) h_f = f·(L/D)·V²/2g &nbsp; (6) h_m = ΣK·V²/2g, ΣK = Σ nᵢKᵢ<br>
+(7) P₁/ρg + V₁²/2g + z₁ + h_bomba = P₂/ρg + V₂²/2g + z₂ + h_L, con h_L = Σh_f + Σh_m<br>
+(8) Serie: Q igual en todos los tramos; h_L = Σ h_Li<br>
+(9) Paralelo: ΣQᵢ = Q y h_Li igual en todos los ramales (se resuelve por bisección)<br>
+(10) ΔP_pérdidas = ρ·g·h_L; potencia hidráulica = ρ·g·Q·h_bomba</div>
+<p><b>Hipótesis:</b> flujo estacionario, incompresible, isotérmico, tubería llena y circular, propiedades evaluadas a la temperatura dada, K constantes (turbulento completamente desarrollado).
+<b>Dominio:</b> 0.5 ≤ Re; Colebrook válido para Re ≥ 4000 y ε/D ≤ 0.05; zona 2300–4000 es aproximada. Aire solo si V &lt; 100 m/s y ΔP &lt; 10 % de P (Mach &lt; 0.3). Red general con nodos (Hardy Cross) se agrega en la entrega final; el paralelo actual resuelve un lazo de 2–3 ramales.</p>
+<p><b>Constantes y conversiones (exactas):</b> g = 9.80665 m/s²; 1 ft = 0.3048 m; 1 in = 0.0254 m; 1 gal US = 3.785411784 L; 1 psi = 6894.757293 Pa; 1 hp = 745.69987 W; 1 lbm/ft³ = 16.01846337 kg/m³; 1 lbm/(ft·s) = 1.488163944 Pa·s; °F = 1.8 °C + 32.</p>
+<p><b>Fuentes:</b> Çengel y Cimbala, <i>Mecánica de fluidos</i> (Tablas A-3, A-9, A-13, 8-2 rugosidad y 8-4 coeficientes K); White, <i>Fluid Mechanics</i> (Colebrook, Moody); agua: ρ de Kell (1975) y μ por correlación tipo Vogel, contrastadas con la Tabla A-3 de Çengel y Cimbala; aire: ρ de gas ideal (R = 287.05 J/kg·K) y μ por ley de Sutherland (Tabla A-9); aceite SAE 30: valores a 20 °C de White (Tabla A.3); glicerina y mercurio: valores a 20 °C de Çengel y Cimbala (Tabla A-13). Para SAE 30, glicerina y mercurio la dependencia con T es un ajuste de Andrade, μ = A·exp(B/T), anclado en el valor a 20 °C; fuera de las cercanías de 20 °C es una extrapolación no verificada con tabla.</p>
+<p><b>Herramienta de IA utilizada:</b> Claude (Anthropic). La atribución por componente (generado, modificado y escrito) se detalla en el Anexo B del reporte.</p></details></div>
+<script>
+"use strict";
+const $=id=>document.getElementById(id), g=9.80665;           // constante g
+// Conversión: [rótulo, factor a SI]
+const FA={SI:{r:['kg/m³',1],m:['Pa·s',1],Q:['L/s',1e-3],D:['mm',1e-3],L:['m',1],e:['mm',1e-3],z:['m',1],V:['m/s',1],h:['m',1],P:['kPa',1e3],W:['kW',1e3]},
+ EN:{r:['lbm/ft³',16.01846337],m:['lbm/ft·s',1.488163944],Q:['gpm',3.785411784e-3/60],D:['in',.0254],L:['ft',.3048],e:['in',.0254],z:['ft',.3048],V:['ft/s',.3048],h:['ft',.3048],P:['psi',6894.757293],W:['hp',745.69987]}};
+let sys='SI';const f2s=(k,v)=>v*FA[sys][k][1], s2f=(k,v)=>v/FA[sys][k][1], un=k=>FA[sys][k][0];
+const tC2d=t=>sys==='SI'?t:t*1.8+32, d2tC=t=>sys==='SI'?t:(t-32)/1.8, uT=()=>sys==='SI'?'°C':'°F';
+const RG={Q:[1e-5,1,'Gasto'],D:[.005,1,'Diámetro'],L:[.1,1e4,'Longitud'],e:[0,.005,'Rugosidad'],z:[-100,100,'Δz'],T:[0,95,'Temperatura']};
+// Propiedades de fluidos (T en °C): ρ [kg/m³], μ [Pa·s]
+const FL={agua:{n:'Agua',rho:T=>(999.83952+16.945176*T-7.9870401e-3*T*T-46.170461e-6*T**3+105.56302e-9*T**4-280.54253e-12*T**5)/(1+16.87985e-3*T),mu:T=>2.414e-5*10**(247.8/(T+133.15))},
+ aire:{n:'Aire (1 atm)',rho:T=>101325/(287.05*(T+273.15)),mu:T=>1.716e-5*Math.pow((T+273.15)/273.15,1.5)*(273.15+110.4)/(T+273.15+110.4),gas:1},
+ sae30:{n:'Aceite SAE 30',rho:T=>891-.66*(T-20),mu:T=>1.954e-8*Math.exp(4839/(T+273.15))},
+ glic:{n:'Glicerina',rho:T=>1261-.61*(T-20),mu:T=>2.83e-11*Math.exp(7237/(T+273.15))},
+ hg:{n:'Mercurio',rho:T=>13546-2.45*(T-20),mu:T=>1.55e-3*Math.exp(-.0025*(T-20))}};
+const ACC=[['Entrada',.5],['Codo 90° brida',.3],['Codo 90° rosc.',1.5],['Compuerta',.2],['Globo',10],['Check',2],['Salida',1]];
+const EPS=[['Acero comercial',.045],['Galvanizado',.15],['Hierro fundido',.26],['Liso/estirado',.0015]];
+const DEF=[{D:.1,L:50,e:4.5e-5,a:[1,2,1,0,0,0,1]},{D:.08,L:30,e:4.5e-5,a:[0,2,0,1,0,0,1]},{D:.15,L:80,e:2.6e-4,a:[0,1,0,0,1,0,0]}];
+let saved=JSON.parse(JSON.stringify(DEF));
+// ---- Física ----
+function turb(Re,rr){let x=1/Math.sqrt(.02);for(let i=0;i<60;i++){const nx=-2*Math.log10(rr/3.7+2.51*x/Re);if(Math.abs(nx-x)<1e-12){x=nx;break}x=nx}return 1/(x*x)} // Ec. (4)
+function fric(Re,rr){if(Re<=2300)return 64/Re;if(Re>=4000)return turb(Re,rr);const t=(Re-2300)/1700;return 64/2300*(1-t)+turb(4000,rr)*t} // Ec. (3)-(4)
+function segV(s,V,F){const Re=F.rho*V*s.D/F.mu,f=Re>0?fric(Re,s.e/s.D):0,dyn=V*V/(2*g); // Ec. (1),(5),(6)
+ return{V,Re,f,hf:f*s.L/s.D*dyn,hm:s.K*dyn,Q:V*Math.PI*s.D*s.D/4}}
+function solveV(s,F,h){let lo=0,hi=1;const hl=V=>{const r=segV(s,V,F);return r.hf+r.hm};while(hl(hi)<h&&hi<1e5)hi*=2;for(let i=0;i<70;i++){const m=(lo+hi)/2;hl(m)<h?lo=m:hi=m}return(lo+hi)/2}
+function solvePar(S,F,Q){let lo=0,hi=1;const tot=h=>S.reduce((a,s)=>a+segV(s,solveV(s,F,h),F).Q,0); // Ec. (9)
+ while(tot(hi)<Q&&hi<1e7)hi*=2;for(let i=0;i<50;i++){const m=(lo+hi)/2;tot(m)<Q?lo=m:hi=m}const h=(lo+hi)/2;return{h,r:S.map(s=>segV(s,solveV(s,F,h),F))}}
+// ---- Interfaz ----
+function inp(id,k,v,step){return `<label for="${id}">${RG[k][2]} (${un(k)})</label><input id="${id}" data-k="${k}" type="number" step="${step||'any'}" value="${+s2f(k,v).toPrecision(6)}">`}
+function readSeg(){const n=+$('n').value;for(let i=0;i<3;i++){if(!$('D'+i))continue;saved[i].D=f2s('D',+$('D'+i).value);saved[i].L=f2s('L',+$('L'+i).value);saved[i].e=f2s('e',+$('e'+i).value);saved[i].a=ACC.map((_,j)=>+$(`a${i}_${j}`).value)}}
+function build(){const n=+$('n').value,p=$('md').value==='p';let h='';
+ for(let i=0;i<n;i++){const s=saved[i];h+=`<div class="p seg"><h2>${p?'Ramal':'Tramo'} ${i+1}</h2><div class="row"><div>${inp('D'+i,'D',s.D)}</div><div>${inp('L'+i,'L',s.L)}</div></div>
+ <div class="row"><div>${inp('e'+i,'e',s.e)}</div><div><label for="m${i}">Material (ε, Çengel Tabla 8-2)</label><select id="m${i}" data-i="${i}"><option value="">Personalizado</option>${EPS.map((x,j)=>`<option value="${j}">${x[0]}</option>`).join('')}</select></div></div>
+ <label>Accesorios (cantidad × K)</label><div class="acc">${ACC.map((a,j)=>`<div><label for="a${i}_${j}">${a[0]} (${a[1]})</label><input id="a${i}_${j}" type="number" min="0" max="50" step="1" value="${s.a[j]}"></div>`).join('')}</div></div>`}
+ $('segs').innerHTML=h;$('lT').textContent=`Temperatura (${uT()})`;$('lQ').textContent=`Gasto total Q (${un('Q')})`;$('lz').textContent=`Δz (${un('z')})`}
+function setMain(vals){$('T').value=+tC2d(vals.T).toPrecision(5);$('Q').value=+s2f('Q',vals.Q).toPrecision(5);$('z').value=+s2f('z',vals.z).toPrecision(5)}
+function rd(id,k,errs,lbl){const el=$(id),v=f2s(k,+el.value),[a,b,nm]=RG[k];if(el.value===''||!isFinite(v)||v<a-1e-12||v>b+1e-12){errs.push(`${nm}${lbl||''} fuera de rango (${+s2f(k,a).toPrecision(4)} a ${+s2f(k,b).toPrecision(4)} ${un(k)}).`);return null}return v}
+const fx=(x,d)=>!isFinite(x)?'—':Math.abs(x)>=1e5||(x!==0&&Math.abs(x)<1e-3)?x.toExponential(2):x.toFixed(d);
+function calc(){const errs=[],warn=[],n=+$('n').value,par=$('md').value==='p';
+ const Tt=d2tC(+$('T').value);let T=null;if($('T').value===''||Tt<RG.T[0]||Tt>RG.T[1])errs.push(`Temperatura fuera de rango (${+tC2d(0)} a ${+tC2d(95).toFixed(0)} ${uT()}).`);else T=Tt;
+ const Q=rd('Q','Q',errs),z=rd('z','z',errs),S=[];
+ for(let i=0;i<n;i++){const D=rd('D'+i,'D',errs,' '+(i+1)),L=rd('L'+i,'L',errs,' '+(i+1)),e=rd('e'+i,'e',errs,' '+(i+1));let K=0;
+  ACC.forEach((a,j)=>{const c=+$(`a${i}_${j}`).value;if(!(c>=0&&c<=50&&Number.isInteger(c)))errs.push(`Cantidad de ${a[0]} en ${i+1}: entero de 0 a 50.`);else K+=c*a[1]}); // ΣK
+  S.push({D,L,e,K})}
+ $('errs').textContent=errs.join(' ');
+ if(errs.length||T===null){$('chips').innerHTML='';$('tb').innerHTML='';$('warn').textContent='';$('cl').textContent='';return}
+ const key=$('fl').value,fl=FL[key],F={rho:fl.rho(T),mu:fl.mu(T)};let R,hL,rows;
+ if(par){const r=solvePar(S,F,Q);hL=r.h;R=r.r}else{R=S.map(s=>segV(s,Q/(Math.PI*s.D*s.D/4),F));hL=R.reduce((a,r)=>a+r.hf+r.hm,0)} // Ec. (2),(8)
+ const hb=hL+z,dP=F.rho*g*hL,W=F.rho*g*Q*hb,Vmax=Math.max(...R.map(r=>r.V));
+ R.forEach((r,i)=>{const rg=r.Re<2300?'Laminar':r.Re<4000?'Transición':'Turbulento';r.rg=rg;
+  if(rg==='Transición')warn.push(`${par?'Ramal':'Tramo'} ${i+1}: Re = ${fx(r.Re,0)} en transición (2300–4000); f aproximado.`);
+  if(rg==='Laminar'&&r.hm>0)warn.push(`${par?'Ramal':'Tramo'} ${i+1}: flujo laminar; los K de turbulento subestiman/ajustan mal las pérdidas menores.`);
+  if(S[i].e/S[i].D>.05)warn.push(`${par?'Ramal':'Tramo'} ${i+1}: ε/D > 0.05, fuera del dominio de Colebrook.`);});
+ if(fl.gas){if(Vmax>100||dP>.1*101325)warn.push('Aire: Mach > 0.3 o ΔP > 10 % de P; la hipótesis incompresible deja de valer.')}
+ else if(Vmax>3)warn.push(`Velocidad > ${fx(s2f('V',3),1)} ${un('V')}: riesgo de ruido, erosión y golpe de ariete.`);
+ if(key==='agua'&&T>80)warn.push(`Agua > ${tC2d(80).toFixed(0)} ${uT()}: presión de vapor alta; revise cavitación en la succión.`);
+ $('warn').innerHTML=warn.join('<br>');
+ const ch=(v,l)=>`<div class="chip"><b>${v}</b><span>${l}</span></div>`;
+ $('chips').innerHTML=ch(fx(s2f('r',F.rho),sys==='SI'?1:2)+' '+un('r'),'ρ del fluido')+ch(sys==='SI'?fx(F.mu*1e3,3)+' mPa·s':fx(s2f('m',F.mu),5)+' '+un('m'),'μ del fluido')+ch(fx(s2f('h',hL),3)+' '+un('h'),'Pérdida total h_L')+ch(fx(s2f('P',dP),2)+' '+un('P'),'ΔP por pérdidas (Ec. 10)')+
+  ch(fx(s2f('h',hb),3)+' '+un('h'),hb<0?'Carga disponible (gravedad)':'Carga de bomba (Ec. 7)')+ch(fx(s2f('W',Math.abs(W)),3)+' '+un('W'),'Potencia hidráulica');
+ $('tb').innerHTML=`<tr><th></th>${par?`<th>Q (${un('Q')})</th>`:''}<th>V (${un('V')})</th><th>Re</th><th>Régimen</th><th>f</th><th>ΣK</th><th>h_f (${un('h')})</th><th>h_m (${un('h')})</th></tr>`+
+  R.map((r,i)=>`<tr><td>${par?'Ramal':'Tramo'} ${i+1}</td>${par?`<td>${fx(s2f('Q',r.Q),3)}</td>`:''}<td>${fx(s2f('V',r.V),3)}</td><td>${fx(r.Re,0)}</td><td>${r.rg}</td><td>${fx(r.f,4)}</td><td>${S[i].K.toFixed(2)}</td><td>${fx(s2f('h',r.hf),3)}</td><td>${fx(s2f('h',r.hm),3)}</td></tr>`).join('');
+ const sumQ=R.reduce((a,r)=>a+r.Q,0),hs=R.reduce((a,r)=>a+r.hf+r.hm,0);
+ $('cl').innerHTML=par?`Cierre de masa: ΣQᵢ − Q = ${s2f('Q',sumQ-Q).toExponential(2)} ${un('Q')} &nbsp;| h_L igual en ramales: máx |h_Li − h_L| = ${s2f('h',Math.max(...R.map(r=>Math.abs(r.hf+r.hm-hL)))).toExponential(2)} ${un('h')}`
+  :`Cierre de energía (Ec. 7): h_bomba − (Δz + Σh_f + Σh_m) = ${s2f('h',hb-(z+hs)).toExponential(2)} ${un('h')} &nbsp;| Q constante: ${R.every(r=>Math.abs(r.Q-Q)<1e-9*Math.max(1,Q))?'<span class="ok">cumple</span>':'revisar'}`;
+ draw(S,R,par,hL)}
+// ---- Esquema ----
+function draw(S,R,par,hL){const c=$('cv'),W=c.clientWidth,H=320,d=devicePixelRatio||1;c.width=W*d;c.height=H*d;const x=c.getContext('2d');x.setTransform(d,0,0,d,0,0);
+ const cs=getComputedStyle(document.documentElement),ink=cs.getPropertyValue('--ink'),mut=cs.getPropertyValue('--mut'),ac=cs.getPropertyValue('--ac');
+ const Vm=Math.max(...R.map(r=>r.V))||1,col=v=>`hsl(${200-170*Math.min(1,v/Vm)},70%,50%)`,Dm=Math.max(...S.map(s=>s.D)),th=s=>Math.max(8,56*s.D/Dm);
+ x.font='12px system-ui';x.lineWidth=1.5;x.strokeStyle=ink;x.fillStyle=ink;const n=S.length,pad=30;
+ const lab=(t,px,py)=>{x.fillStyle=ink;x.textAlign='center';x.fillText(t,px,py)};
+ if(!par){const A=W-2*pad,sl=S.reduce((a,s)=>a+s.L,0);let w=S.map(s=>Math.max(60,A*s.L/sl));const k=A/w.reduce((a,b)=>a+b,0);w=w.map(v=>v*k);let px=pad,cy=215,ey=60;
+  const e0=ey;x.beginPath();x.moveTo(px,e0);let acc=0;
+  S.forEach((s,i)=>{const t=th(s);x.fillStyle=col(R[i].V);x.fillRect(px,cy-t/2,w[i],t);x.strokeRect(px,cy-t/2,w[i],t);
+   lab(`D=${fx(s2f('D',s.D),1)} ${un('D')} · L=${fx(s2f('L',s.L),1)} ${un('L')}`,px+w[i]/2,cy+Dm*0+50);lab(`V=${fx(s2f('V',R[i].V),2)} ${un('V')}`,px+w[i]/2,cy+66);
+   acc+=R[i].hf+R[i].hm;x.lineTo(px,e0+70*acc/(hL||1)-70*(R[i].hf+R[i].hm)/(hL||1));x.lineTo(px+w[i],e0+70*acc/(hL||1));px+=w[i]});
+  x.strokeStyle=ac;x.lineWidth=2.5;x.stroke();x.fillStyle=mut;x.textAlign='left';x.fillText(`Línea de energía (solo pérdidas): h_L = ${fx(s2f('h',hL),3)} ${un('h')}`,pad,28);
+ }else{const x1=pad+30,x2=W-pad-30,gap=(H-50)/n;x.strokeStyle=ink;
+  S.forEach((s,i)=>{const cy=25+gap*(i+.5),t=th(s);x.fillStyle=col(R[i].V);x.fillRect(x1+40,cy-t/2,x2-x1-80,t);x.strokeRect(x1+40,cy-t/2,x2-x1-80,t);
+   x.beginPath();x.moveTo(x1,H/2);x.lineTo(x1,cy);x.lineTo(x1+40,cy);x.moveTo(x2,H/2);x.lineTo(x2,cy);x.lineTo(x2-40,cy);x.stroke();
+   lab(`Ramal ${i+1}: D=${fx(s2f('D',s.D),1)} ${un('D')} · L=${fx(s2f('L',s.L),1)} ${un('L')} · Q=${fx(s2f('Q',R[i].Q),2)} ${un('Q')} · V=${fx(s2f('V',R[i].V),2)} ${un('V')}`,W/2,cy+t/2+14)});
+  x.fillStyle=ink;x.textAlign='left';x.fillText('Entrada',pad-20,H/2);x.textAlign='right';x.fillText('Salida',W-pad+22,H/2)}}
+// ---- Verificación del factor f ----
+function verif(){const cs=[[1e3,0,.064],[1e4,0,.0309],[1e5,0,.0180],[1e6,0,.0116],[1e5,.001,.0222]];
+ $('vt').innerHTML='<tr><th>Re</th><th>ε/D</th><th>f referencia</th><th>f app</th><th>Error %</th><th>Haaland (control)</th></tr>'+cs.map(([Re,rr,ref])=>{const f=fric(Re,rr),hf=Re>=4000?1/Math.pow(-1.8*Math.log10(Math.pow(rr/3.7,1.11)+6.9/Re),2):NaN;
+  return `<tr><td>${Re.toExponential(0)}</td><td>${rr}</td><td>${ref}</td><td>${f.toFixed(4)}</td><td class="${Math.abs(f/ref-1)<.02?'ok':'e'}">${(100*(f/ref-1)).toFixed(2)}</td><td>${isNaN(hf)?'—':hf.toFixed(4)}</td></tr>`}).join('')}
+// ---- Eventos ----
+function conv(vals){} 
+$('fl').innerHTML=Object.entries(FL).map(([k,v])=>`<option value="${k}">${v.n}</option>`).join('');
+$('bu').onclick=()=>{const old={T:d2tC(+$('T').value),Q:f2s('Q',+$('Q').value),z:f2s('z',+$('z').value)};readSeg();sys=sys==='SI'?'EN':'SI';$('bu').textContent='Unidades: '+(sys==='SI'?'SI':'Inglés');build();setMain(old);syncR();calc()};
+$('md').onchange=$('n').onchange=()=>{readSeg();build();calc()};
+function syncR(){$('Qr').value=Math.round(100*Math.log10(f2s('Q',+$('Q').value)/1e-5)/5)}
+$('Qr').oninput=()=>{$('Q').value=+s2f('Q',1e-5*Math.pow(10,5*$('Qr').value/100)).toPrecision(4);calc()};
+document.addEventListener('input',e=>{if(e.target.id!=='Qr'){if(e.target.id==='Q')syncR();calc()}});
+document.addEventListener('change',e=>{if(e.target.id&&e.target.id[0]==='m'&&e.target.dataset.i!==undefined&&e.target.value!==''){$('e'+e.target.dataset.i).value=+s2f('e',EPS[e.target.value][1]*1e-3).toPrecision(5);calc()}});
+$('fl').onchange=calc;addEventListener('resize',calc);
+build();setMain({T:20,Q:.01,z:0});syncR();calc();verif();
+</script></body></html>
